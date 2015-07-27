@@ -1,0 +1,122 @@
+#!/usr/bin/env ruby
+
+$input = STDIN.read.gsub(/\s+/, '')
+$pos = 0
+$taken = true
+$environment = {}
+
+def peek(n=1)
+  $input[$pos, n]
+end
+
+def advance(n)
+  $pos += n
+end
+
+def match?(string)
+  n = string.size
+  peek(n) == string && advance(n)
+end
+
+def extract(lead, glob)
+  i = 1
+  i += 1 while glob.include?($input[$pos + i])
+  result = $input[$pos, i]
+  $pos += result.size
+  result
+end
+
+def branch(taken)
+  was = $taken
+  $taken &&= taken
+  yield
+  $taken = was
+end
+
+def program
+  statements
+end
+
+def statements
+  loop do
+    statement
+    break unless match?(';')
+  end
+end
+
+def statement
+  ifzero || println || mutation
+end
+
+def ifzero
+  return unless match?('?')
+  taken = (value == 0)
+  match?('{')
+  branch(taken) { statements }
+  match?('}')
+  true
+end
+
+def println
+  return unless match?('!')
+  val = value
+  puts val if $taken
+  true
+end
+
+def mutation
+  x = variable
+  assignment(x) || addition(x) || subtraction(x)
+  true
+end
+
+def will_use?(x)
+  /[^a-zA-Z]#{x}([^a-zA-Z0-9]|$)/.match($input)
+end
+
+def assignment(x)
+  return unless match?('=')
+  val = value
+  $environment[x] = val if $taken && will_use?(x)
+  true
+end
+
+def addition(x)
+  return unless match?('+')
+  match?('=')
+  val = value
+  $environment[x] += val if $taken && will_use?(x)
+  true
+end
+
+def subtraction(x)
+  return unless match?('-')
+  match?('=')
+  val = value
+  $environment[x] -= val if $taken && will_use?(x)
+  true
+end
+
+def value
+  v = integer
+  unless v
+    x = variable
+    v = $environment[x]
+    $environment.delete(x) unless will_use?(x)
+  end
+  v
+end
+
+ALPHA = ('a'..'z').to_a + ('A'..'Z').to_a
+NUMERIC = ('0'..'9').to_a
+ALNUM = ALPHA + NUMERIC
+
+def variable
+  extract(ALPHA, ALNUM).to_sym
+end
+
+def integer
+  ('0'..'9').include?(peek) && extract(NUMERIC, NUMERIC).to_i
+end
+
+program
