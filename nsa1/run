@@ -1,0 +1,49 @@
+#!/usr/bin/env ruby
+
+require 'json'
+
+raise ArgumentError unless ARGV.size == 1
+raise ArgumentError unless ARGV.first =~ /^--minimal-group-size=(\d+)$/
+n = $1.to_i
+
+# ingest input
+graph = {}
+JSON.parse(STDIN.read).each do |a, b|
+  graph[a] ||= []
+  graph[b] ||= []
+  graph[a] << b
+  graph[b] << a
+end
+
+# prune anyone that doesn't have at least N friends, then repeat for anyone
+# that doesn't have at least N unpruned friends, etc., until no one left to
+# prune
+loop do
+  to_prune = graph.keys.select{ |k| graph[k].size < n - 1 }
+  break if to_prune.empty?
+  to_prune.each do |p|
+    graph[p].each{ |q| graph[q].delete(p) }
+    graph.delete(p)
+  end
+end
+
+def BronKerbosch2(graph, retain, propose, exclude, cb)
+  cb.(retain) if propose.empty? and exclude.empty?
+  return if propose.empty?
+  u = (propose | exclude).sort_by{ |k| (propose - graph[k]).size }.first
+  (propose - graph[u]).each do |v|
+    BronKerbosch2(graph, retain | [v], propose & graph[v], exclude & graph[v], cb)
+    propose -= [v]
+    exclude |= [v]
+  end
+end
+
+def list_cliques(graph, n)
+  cliques = []
+  BronKerbosch2(graph, [], graph.keys, [], -> (clique) {
+    cliques << clique.to_a if clique.size >= n
+  })
+  cliques
+end
+
+puts JSON.fast_generate(list_cliques(graph, n))

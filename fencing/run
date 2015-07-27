@@ -1,0 +1,213 @@
+#!/usr/bin/env ruby
+
+require "rexml/document"
+
+# load SVG
+xml = ""
+loop do
+  line = STDIN.gets.chomp
+  break if line.empty?
+  xml << line
+end
+xml = REXML::Document.new(xml)
+
+# extract path string for compound
+path = REXML::XPath.first(xml, "//path[@id='compound']")
+path = path.attributes['d']
+
+# remove commas and normalize whitespace
+path = path.gsub(/\s*,/, ' ')
+path = path.gsub(/\s+/, ' ')
+
+
+# whitespace: ' '?
+def whitespace(path, p)
+  path[p] == ' ' ? p + 1 : p
+end
+
+# fullpath: move-to command* close-path
+def parse(path, p=0)
+  coords, p = move_to(path, p)
+  until close_path(path, p)
+    p = command(path, p, coords)
+  end
+  coords
+end
+
+#/^M-?\d+(\.\d+)?( ?-?\d+(\.\d+)?)*( ?[lLvVhH] ?-?\d+(\.\d+)?( ?-?\d+(\.\d+)?)*)+ ?[zZ]$/
+
+# move-to: M coordinates
+def move_to(path, p)
+  raise unless path[p] == 'M'
+  coordinates(path, p + 1)
+end
+
+# close-path: whitespace [Zz]
+def close_path(path, p)
+  p = whitespace(path, p)
+  path[p] == 'Z' || path[p] == 'z'
+end
+
+# command: whitespace (line-to | horizontal-line-to | vertical-line-to)
+def command(path, p, coords)
+  p = whitespace(path, p)
+  line_to(path, p, coords) ||
+  horizontal(path, p, coords) ||
+  vertical(path, p, coords)
+end
+
+# line-to: [Ll] coordinates
+def line_to(path, p, coords)
+  return unless path[p] == 'L' || path[p] == 'l'
+  relative = path[p] == 'l'
+  new_coords, p = coordinates(path, p + 1)
+  if relative
+    x, y = coords.last
+    new_coords.each do |dx, dy|
+      x += dx
+      y += dy
+      coords << [x, y]
+    end
+  else
+    coords.concat(new_coords)
+  end
+  p
+end
+
+# horizontal: [Hh] numbers
+def horizontal(path, p, coords)
+  return unless path[p] == 'H' || path[p] == 'h'
+  relative = path[p] == 'h'
+  xs, p = numbers(path, p + 1)
+  if relative
+    x, y = coords.last
+    xs.each do |dx|
+      x += dx
+      coords << [x, y]
+    end
+  else
+    _, y = coords.last
+    xs.each do |nx|
+      coords << [nx, y]
+    end
+  end
+  p
+end
+
+# vertical: [Vv] numbers
+def vertical(path, p, coords)
+  raise unless path[p] == 'V' || path[p] == 'v'
+  relative = path[p] == 'v'
+  ys, p = numbers(path, p + 1)
+  if relative
+    x, y = coords.last
+    ys.each do |dy|
+      y += dy
+      coords << [x, y]
+    end
+  else
+    x, _ = coords.last
+    ys.each do |ny|
+      coords << [x, ny]
+    end
+  end
+  p
+end
+
+# coordinates: coordinate+
+def coordinates(path, p)
+  new_coords = []
+  p = whitespace(path, p)
+  while path[p] =~ /[-0-9]/
+    coord, p = coordinate(path, p)
+    new_coords << coord
+  end
+  return new_coords, p
+end
+
+# coordinate: number number
+def coordinate(path, p)
+  x, p = number(path, p)
+  y, p = number(path, p)
+  return [x, y], p
+end
+
+# numbers: number+
+def numbers(path, p)
+  result = []
+  p = whitespace(path, p)
+  while path[p] =~ /[-0-9]/
+    number, p = number(path, p)
+    result << number
+  end
+  return result, p
+end
+
+# number: whitespace -?\d+(?:\.\d+)?
+def number(path, p)
+  p = whitespace(path, p)
+  result = ''
+  if path[p] == '-'
+    p += 1
+    result << '-'
+  end
+  while path[p] =~ /[\d\.]/
+    result << path[p]
+    p += 1
+  end
+  return result.to_f, p
+end
+
+# parse path string
+coords = parse(path)
+
+# convert vertex list to edge list
+edges = []
+x1, y1 = coords[0]
+(1...coords.size).each do |i|
+  x2, y2 = coords[i]
+  edges << [x1, y1, x2, y2]
+  x1, y1 = x2, y2
+end
+x2, y2 = coords[0]
+edges << [x1, y1, x2, y2]
+
+def contained?(x, y, edges)
+  crossed = edges.count do |x1, y1, x2, y2|
+    if y < y1 && y <= y2
+      # below edge
+      false
+    elsif y1 < y && y2 <= y
+      # above edge
+      false
+    elsif x1 < x && x2 <= x
+      # right of edge
+      false
+    elsif x < x1 && x <= x2
+      # left of edge in y-range
+      true
+    else
+      # in edge's bounding box
+      discriminant = (x2 - x1) * (y - y1) - (x - x1) * (y2 - y1)
+      discriminant *= -1 if y2 < y1
+      if discriminant == 0
+        # on edge
+        return true
+      elsif discriminant > 0
+        # left of slanted edge
+        true
+      else
+        # right of slanted edge
+        false
+      end
+    end
+  end
+  crossed % 2 == 1
+end
+
+# start taking queries
+while line = STDIN.gets
+  line = line.chomp
+  x, y = line.split(/[, ]+/).map(&:to_f)
+  puts contained?(x, y, edges)
+end

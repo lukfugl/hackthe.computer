@@ -1,0 +1,19 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require 'tsort'
+
+raise ArgumentError unless ARGV.size == 1
+raise ArgumentError unless ARGV.first =~ /^--minimal-group-size=(\d+)$/
+n = $1.to_i
+
+graph = {}
+JSON.parse(STDIN.read).each do |a, b|
+  graph[a] ||= []
+  graph[a] << b
+end
+each_node = -> (&b) { graph.each_key(&b) }
+each_child = -> (k, &b) { (graph[k] || []).each(&b) }
+
+cliques = TSort.strongly_connected_components(each_node, each_child).reject{ |clique| clique.size < n }
+puts JSON.fast_generate(cliques)

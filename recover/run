@@ -1,0 +1,43 @@
+#!/usr/bin/env ruby
+
+# parse command line arguments
+raise ArgumentError unless ARGV.size == 2
+raise ArgumentError unless ARGV.first =~ /^--in=(\d+)$/
+m = $1.to_i
+raise ArgumentError unless ARGV.last =~ /^--out=(\d+)$/
+n = $1.to_i
+raise ArgumentError unless n > m
+
+until STDIN.eof?
+  # read input set
+  inputs = []
+  n.times.map do |i|
+    line = STDIN.gets.chomp
+    next if inputs.size == m
+    next if line == "MISSING"
+    raise ArgumentError unless line =~ %r{^(\d+)/(\d+)$}
+    inputs << [i, Rational($1.to_i, $2.to_i)]
+  end
+  raise ArgumentError unless inputs.size == m
+
+  m.times do |x|
+    # try and just echo a supplied answer
+    _, y = inputs.detect{ |xi, _| xi == x }
+
+    # construct an answer if needed
+    unless y
+      y = 0
+      inputs.each_with_index do |(xi, yi), i|
+        inputs.each_with_index do |(xj, _), j|
+          next if j == i
+          yi *= Rational(x - xj, xi - xj)
+        end
+        y += yi
+      end
+    end
+
+    # print answer
+    raise ArgumentError unless y.numerator % y.denominator == 0
+    puts "%08b" % [y.to_i % 256]
+  end
+end

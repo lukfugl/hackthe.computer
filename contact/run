@@ -1,0 +1,176 @@
+#!/usr/bin/env ruby
+
+# take an input unfolded cube and map it to a consistently ordered series of
+# faces
+#
+# key: which slots from the space below have values
+#
+#    0  1  2  3  4
+#    5  6  7  8  9
+#   10 11 12 13 14
+#
+# value: [idx, rot] for each square from the key, where
+# idx: space to draw
+# rot: number of quadrants to rotate it
+#
+# e.g. this:
+#
+# [2, 5, 6, 7, 12, 13] => [[0, 2], [1, 0], [2, 0], [3, 0], [5, 1], [4, 2]]
+#
+# maps:
+#
+#     AX
+#     AA
+# BXCXDX
+# BBCCDD
+#     EXFX
+#     EEFF
+#
+# to
+#
+# AA BX CX DX XF EE
+# XA BB CC DD FF XE
+#
+# Note, however, that this only covers a kernel of the possible input shapes.
+# i.e. many of these inputs can be rotated to produce something not in this
+# list, but everything (valid) not in this list can be mapped back to this list
+# under rotation. so if a lookup in this table fails, rotate and try again.
+#
+NORMALIZE = {
+  [0, 5, 6, 7,  8, 10] => [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [5, 0]],
+  [1, 5, 6, 7,  8, 11] => [[0, 1], [1, 0], [2, 0], [3, 0], [4, 0], [5, 3]],
+  [2, 5, 6, 7,  8, 12] => [[0, 2], [1, 0], [2, 0], [3, 0], [4, 0], [5, 2]],
+  [3, 5, 6, 7,  8, 13] => [[0, 3], [1, 0], [2, 0], [3, 0], [4, 0], [5, 1]],
+  [0, 5, 6, 7,  8, 13] => [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [5, 1]],
+  [1, 5, 6, 7,  8, 12] => [[0, 1], [1, 0], [2, 0], [3, 0], [4, 0], [5, 2]],
+  [2, 5, 6, 7,  8, 11] => [[0, 2], [1, 0], [2, 0], [3, 0], [4, 0], [5, 3]],
+  [3, 5, 6, 7,  8, 10] => [[0, 3], [1, 0], [2, 0], [3, 0], [4, 0], [5, 0]],
+  [0, 5, 6, 7,  8, 11] => [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [5, 3]],
+  [3, 5, 6, 7,  8, 12] => [[0, 3], [1, 0], [2, 0], [3, 0], [4, 0], [5, 2]],
+  [0, 5, 6, 7,  8, 12] => [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [5, 2]],
+  [3, 5, 6, 7,  8, 11] => [[0, 3], [1, 0], [2, 0], [3, 0], [4, 0], [5, 3]],
+  [0, 5, 6, 7, 12, 13] => [[0, 0], [1, 0], [2, 0], [3, 0], [5, 1], [4, 2]],
+  [1, 5, 6, 7, 12, 13] => [[0, 1], [1, 0], [2, 0], [3, 0], [5, 1], [4, 2]],
+  [2, 5, 6, 7, 12, 13] => [[0, 2], [1, 0], [2, 0], [3, 0], [5, 1], [4, 2]],
+  [1, 6, 7, 8, 10, 11] => [[0, 1], [4, 3], [1, 0], [2, 0], [3, 0], [5, 3]],
+  [2, 6, 7, 8, 10, 11] => [[0, 2], [4, 3], [1, 0], [2, 0], [3, 0], [5, 3]],
+  [3, 6, 7, 8, 10, 11] => [[0, 3], [4, 3], [1, 0], [2, 0], [3, 0], [5, 3]],
+  [0, 1, 2, 7,  8,  9] => [[2, 1], [1, 1], [3, 0], [4, 0], [5, 0], [0, 1]],
+  [2, 3, 4, 5,  6,  7] => [[3, 3], [4, 3], [0, 0], [1, 0], [2, 0], [5, 3]],
+  [2, 3, 6, 7, 10, 11] => [[0, 2], [4, 3], [2, 0], [3, 0], [1, 3], [5, 3]],
+  [0, 1, 6, 7, 12, 13] => [[1, 1], [0, 1], [2, 0], [3, 0], [5, 1], [4, 2]]
+}
+
+# similar values, but instead of looking up a non-normalized unfolding,
+# enumerates mappings for the 23 non-identity rotations of the cube
+ROTATIONS = [
+  [[0, 1], [4, 0], [1, 0], [2, 0], [3, 0], [5, 3]],
+  [[0, 2], [3, 0], [4, 0], [1, 0], [2, 0], [5, 2]],
+  [[0, 3], [2, 0], [3, 0], [4, 0], [1, 0], [5, 1]],
+  [[1, 0], [5, 0], [2, 3], [0, 2], [4, 1], [3, 2]],
+  [[1, 1], [4, 1], [5, 0], [2, 3], [0, 2], [3, 1]],
+  [[1, 2], [0, 2], [4, 1], [5, 0], [2, 3], [3, 0]],
+  [[1, 3], [2, 3], [0, 2], [4, 1], [5, 0], [3, 3]],
+  [[2, 0], [5, 1], [3, 3], [0, 1], [1, 1], [4, 2]],
+  [[2, 1], [1, 1], [5, 1], [3, 3], [0, 1], [4, 1]],
+  [[2, 2], [0, 1], [1, 1], [5, 1], [3, 3], [4, 0]],
+  [[2, 3], [3, 3], [0, 1], [1, 1], [5, 1], [4, 3]],
+  [[3, 0], [5, 2], [4, 3], [0, 0], [2, 1], [1, 2]],
+  [[3, 1], [2, 1], [5, 2], [4, 3], [0, 0], [1, 1]],
+  [[3, 2], [0, 0], [2, 1], [5, 2], [4, 3], [1, 0]],
+  [[3, 3], [4, 3], [0, 0], [2, 1], [5, 2], [1, 3]],
+  [[4, 0], [5, 3], [1, 3], [0, 3], [3, 1], [2, 2]],
+  [[4, 1], [3, 1], [5, 3], [1, 3], [0, 3], [2, 1]],
+  [[4, 2], [0, 3], [3, 1], [5, 3], [1, 3], [2, 0]],
+  [[4, 3], [1, 3], [0, 3], [3, 1], [5, 3], [2, 3]],
+  [[5, 0], [3, 2], [2, 2], [1, 2], [4, 2], [0, 0]],
+  [[5, 1], [4, 2], [3, 2], [2, 2], [1, 2], [0, 3]],
+  [[5, 2], [1, 2], [4, 2], [3, 2], [2, 2], [0, 2]],
+  [[5, 3], [2, 2], [1, 2], [4, 2], [3, 2], [0, 1]]
+]
+
+def rotate(array, rot)
+  return array unless array.is_a?(Array)
+  return array if rot == 0
+  array = array.map{ |row| row.map{ |val| rotate(val, rot) } }
+  case rot
+  when 1 then array.transpose.reverse
+  when 2 then array.map(&:reverse).reverse
+  when 3 then array.transpose.map(&:reverse)
+  end
+end
+
+def index(cube)
+  15.times.select do |index|
+    row = index / 5
+    col = index % 5
+    cube[row] && cube[row][col]
+  end
+end
+
+def transform(sequence, transformation)
+  transformation.map{ |idx, rot| rotate(sequence[idx], rot) }
+end
+
+def normalize(cube)
+  cube = rotate(cube, 1) if cube.size > 3
+  indices = index(cube)
+  unless NORMALIZE.has_key?(indices)
+    cube = rotate(cube, 2)
+    indices = index(cube)
+  end
+  sequence = indices.map{ |i| cube[i / 5][i % 5] }
+  transformation = NORMALIZE[indices]
+  transform(sequence, transformation)
+end
+
+def visit(cube, seen)
+  sequence = normalize(cube)
+  return false if seen[sequence.hash]
+  seen[sequence.hash] = true
+  ROTATIONS.each{ |xform| seen[transform(sequence, xform).hash] = true }
+  return true
+end
+
+def form_cube(lines)
+  count = lines.map{ |line| line.strip.size }.inject(&:+)
+  size = Math.sqrt(count / 6).to_i
+  cube = []
+  rows = lines.size / size
+  cols = lines.map(&:size).max / size
+  rows.times.map do |row|
+    cube[row] = []
+    cols.times.map do |col|
+      corner = lines[row * size][col * size]
+      if corner.nil? || corner == ' '
+        cube[row][col] = nil
+      else
+        face = []
+        size.times do |i|
+          face << lines[row * size + i].slice(col * size, size).split('')
+        end
+        cube[row][col] = face
+      end
+    end
+  end
+  cube
+end
+
+seen = {}
+lines = []
+while line = STDIN.gets
+  line = line.chomp
+  if line.empty?
+    if visit(form_cube(lines), seen)
+      lines.map{ |l| puts l }
+      puts
+    end
+    lines = []
+  else
+    lines << line
+  end
+end
+
+if !lines.empty? && visit(form_cube(lines), seen)
+  lines.map{ |l| puts l }
+end

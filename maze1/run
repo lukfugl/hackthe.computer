@@ -1,0 +1,70 @@
+#!/usr/bin/env ruby
+
+require_relative 'pqueue'
+
+flow = {}
+start = goal = nil
+
+# read in maze
+h = w = 0
+STDIN.each_line.each_with_index do |row, j|
+  h = j if j > h
+  row.chomp.split(//).each_with_index do |cell, i|
+    w = i if i > w
+    flow[i] ||= {}
+    flow[i][j] = cell if cell == 'X' || cell == 'F'
+    start = [i, j] if cell == 'S'
+    goal = [i, j] if cell == 'F'
+  end
+end
+h += 1
+w += 1
+
+# direction => [di, dj, opposite]
+motions = {
+  'W' => [-1,  0, 'E'],
+  'E' => [ 1,  0, 'W'],
+  'N' => [ 0, -1, 'S'],
+  'S' => [ 0,  1, 'N']
+}
+
+# populate with initial heuristics into priority queue
+si, sj = start
+heuristic = -> ((i, j, l)) { l + (i - si).abs + (j - sj).abs }
+goal << 0
+goal << heuristic.(goal)
+
+queue = PQueue.new([goal]) { |a,b| a.last < b.last }
+until queue.empty?
+  #h.times do |j|
+  #  w.times do |i|
+  #    print flow[i][j] || '-'
+  #  end
+  #  puts
+  #end
+  #puts
+
+  i, j, l, _ = queue.pop
+  l += 1
+  break if [i, j] == start
+  motions.values.each do |di, dj, opposite|
+    ni = i + di
+    nj = j + dj
+    next if ni < 0 || ni >= w || nj < 0 || nj >= h
+    next if flow[ni] && flow[ni][nj]
+    flow[ni][nj] = opposite
+    location = [ni, nj, l]
+    location << heuristic.(location)
+    queue << location
+    break if location == start
+  end
+end
+
+# read out path
+i, j = start
+while flow[i][j] != 'F'
+  puts flow[i][j]
+  di, dj, _ = motions[flow[i][j]]
+  i += di
+  j += dj
+end

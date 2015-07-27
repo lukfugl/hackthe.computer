@@ -1,0 +1,245 @@
+#!/usr/bin/env ruby
+
+class Board
+  # players:
+  X = 0
+  O = 1
+
+  # normals:
+  I = 0
+  J = 1
+  K = 2
+
+  #  0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
+  # ---+---+---+---+---+---+---+---
+  # ** | **|***|***|*  | * |** |**
+  # ***|***|** | **|** |** |** |**
+  #    |   |   |   |** |** |*  | *
+  #
+  # indicates the relative positions (di, dj, dk) of the 5 cells in a
+  # pentomino. first first index is normal, the second is type
+  #
+  # for instance, the deltas for a K-normal type 2 pentomino are TYPES[K][2].
+  # the cells of such a pentomino with panhandle at (i=5, j=7, k=2) are:
+  #
+  #   (i,   j-2, k)
+  #   (i,   j-1, k)
+  #   (i,   j,   k)
+  #   (i+1, j-2, k)
+  #   (i+1, j-1, k)
+  #
+  TYPES = [
+    # I-normal (JK plane)
+    [[[  0, -1, -2 ], [  0, -1, -1 ], [  0,  0, -2 ], [  0,  0, -1 ], [  0,  0,  0 ]],
+     [[  0, -1, +1 ], [  0, -1, +2 ], [  0,  0,  0 ], [  0,  0, +1 ], [  0,  0, +2 ]],
+     [[  0,  0, -2 ], [  0,  0, -1 ], [  0,  0,  0 ], [  0, +1, -2 ], [  0, +1, -1 ]],
+     [[  0,  0,  0 ], [  0,  0, +1 ], [  0,  0, +2 ], [  0, +1, +1 ], [  0, +1, +2 ]],
+     [[  0,  0,  0 ], [  0, +1,  0 ], [  0, +1, +1 ], [  0, +2,  0 ], [  0, +2, +1 ]],
+     [[  0,  0,  0 ], [  0, +1, -1 ], [  0, +1,  0 ], [  0, +2, -1 ], [  0, +2,  0 ]],
+     [[  0, -2,  0 ], [  0, -2, +1 ], [  0, -1,  0 ], [  0, -1, +1 ], [  0,  0,  0 ]],
+     [[  0, -2, -1 ], [  0, -2,  0 ], [  0, -1, -1 ], [  0, -1,  0 ], [  0,  0,  0 ]]],
+    # J-normal (KI plane)
+    [[[ -2,  0, -1 ], [ -1,  0, -1 ], [ -2,  0,  0 ], [ -1,  0,  0 ], [  0,  0,  0 ]],
+     [[ +1,  0, -1 ], [ +2,  0, -1 ], [  0,  0,  0 ], [ +1,  0,  0 ], [ +2,  0,  0 ]],
+     [[ -2,  0,  0 ], [ -1,  0,  0 ], [  0,  0,  0 ], [ -2,  0, +1 ], [ -1,  0, +1 ]],
+     [[  0,  0,  0 ], [ +1,  0,  0 ], [ +2,  0,  0 ], [ +1,  0, +1 ], [ +2,  0, +1 ]],
+     [[  0,  0,  0 ], [  0,  0, +1 ], [ +1,  0, +1 ], [  0,  0, +2 ], [ +1,  0, +2 ]],
+     [[  0,  0,  0 ], [ -1,  0, +1 ], [  0,  0, +1 ], [ -1,  0, +2 ], [  0,  0, +2 ]],
+     [[  0,  0, -2 ], [ +1,  0, -2 ], [  0,  0, -1 ], [ +1,  0, -1 ], [  0,  0,  0 ]],
+     [[ -1,  0, -2 ], [  0,  0, -2 ], [ -1,  0, -1 ], [  0,  0, -1 ], [  0,  0,  0 ]]],
+    # K-normal (IJ plane)
+    [[[ -1, -2,  0 ], [ -1, -1,  0 ], [  0, -2,  0 ], [  0, -1,  0 ], [  0,  0,  0 ]],
+     [[ -1, +1,  0 ], [ -1, +2,  0 ], [  0,  0,  0 ], [  0, +1,  0 ], [  0, +2,  0 ]],
+     [[  0, -2,  0 ], [  0, -1,  0 ], [  0,  0,  0 ], [ +1, -2,  0 ], [ +1, -1,  0 ]],
+     [[  0,  0,  0 ], [  0, +1,  0 ], [  0, +2,  0 ], [ +1, +1,  0 ], [ +1, +2,  0 ]],
+     [[  0,  0,  0 ], [ +1,  0,  0 ], [ +1, +1,  0 ], [ +2,  0,  0 ], [ +2, +1,  0 ]],
+     [[  0,  0,  0 ], [ +1, -1,  0 ], [ +1,  0,  0 ], [ +2, -1,  0 ], [ +2,  0,  0 ]],
+     [[ -2,  0,  0 ], [ -2, +1,  0 ], [ -1,  0,  0 ], [ -1, +1,  0 ], [  0,  0,  0 ]],
+     [[ -2, -1,  0 ], [ -2,  0,  0 ], [ -1, -1,  0 ], [ -1,  0,  0 ], [  0,  0,  0 ]]]
+  ]
+
+  # the first index of the cells structure is the "layer". layer 0 contains the
+  # actual board.
+  def self.read
+    return unless row = STDIN.gets
+    lines = row.chomp.split(/ /)
+    width = lines.size
+    layer0 = lines.map{ |line| line.split(//) }.flatten
+    (width - 1).times do |i|
+      row = STDIN.gets.chomp
+      layer0.concat(row.gsub(/ /, '').split(//))
+    end
+    STDIN.gets
+    #sleep 2 if $sleep && layer0[26] == '_'
+    #sleep 2 if $sleep && layer0[18...27].join('') == 'X___O_X__'
+    new(layer0, width)
+  end
+
+  # layer 1+[player*24]+[normal*8]+[type] (48 such layers) contains the count of
+  # contributions so far towards the pentominoes of the given type with the given
+  # normal for the given player.
+  #
+  # e.g. layer 19 = X's K-normal type 2 pentominoes (1 + 0*24 + 2*8 + 2)
+  #
+  # the remaining three indices of the cells structure are (i, j, k) coordinates.
+  #
+  # e.g.
+  #
+  #  * cells[0, 5, 7, 2] is one of '_', 'X', or 'O', indicating who, if anyone,
+  #    has played at (i=5, j=7, k=2).
+  #
+  #  * cells[19, 5, 7, 2] is an integer indicating how many hits we've seen so
+  #    far for the K-normal type 2 pentomino for player X with panhandle at
+  #    (i=5, j=7, k=2).
+  #
+  def initialize(layer0, width)
+    @range = (0...width)
+    @width = width
+    size = layer0.size
+    @layers = 48.times.map{ Array.new(size, 0) }
+    @layers.unshift(layer0)
+  end
+
+  # translates (i, j, k) tuple into raw index into a layer level structure.
+  # also performs bounds checking, returning nil if any of the three are out of
+  # bounds
+  def index(i, j, k)
+    return nil unless @range.include?(i) && @range.include?(j) && @range.include?(k)
+    (i * @width + j) * @width + k
+  end
+
+  # prints layer 0 back out
+  def play(i, j, k)
+    idx = index(i, j, k)
+    raise ArgumentError unless idx
+    layer0 = @layers[0]
+    layer0[idx] = 'X'
+    layer0.each_with_index do |cell, idx|
+      unless idx == 0
+        if idx % (@width * @width) == 0
+          print "\n"
+        elsif idx % @width == 0
+          print ' '
+        end
+      end
+      print cell
+    end
+    puts
+    puts
+  end
+
+  # iterate over each element of layer 0, yielding each with both the raw index
+  # and the decomposed (i, j, k) coordinates
+  def each_with_indices
+    i = j = k = 0
+    @layers[0].each_with_index do |cell, idx|
+      yield cell, i, j, k, idx
+      k += 1
+      if k == @width
+        k = 0
+        j += 1
+        if j == @width
+          j = 0
+          i += 1
+        end
+      end
+    end
+  end
+
+  # lists the relative location (di, dj, dk, dlayer) of the panhandle for all
+  # 120 pentominoes (5 shifts, 8 types, 3 normals) that a cell may be a part
+  # of. dlayer is calculated from the normal and type.
+  #
+  # di, dj, and dk are just a negation of the values from TYPES. dlayer is
+  # sub portion of the layer due to normal and type.
+  #
+  # these are then used to to know which layer's cells to hit. e.g., if cell
+  # [0, 5, 7, 2] is 'X', then:
+  #
+  #  * CONTAINED_BY[13] corresponds to the hit to X's I-normal type 2 pentomino
+  #    with panhandle at [3, 5, 6, 4]
+  #  * CONTAINED_BY[46] corresponds to the hit to X's J-normal type 1 pentomino
+  #    with panhandle at [10, 3, 7, 3]
+  #  * CONTAINED_BY[119] corresponds to the hit to X's K-normal type 7 pentomino
+  #    with panhandle at [24, 5, 7, 2]
+  #
+  # etc.
+  #
+  CONTAINED_BY = TYPES.each_with_index.map do |types, normal|
+    types.each_with_index.map do |shifts, type|
+      dlayer = 8 * normal + type
+      shifts.map do |di, dj, dk|
+        [-di, -dj, -dk, dlayer]
+      end
+    end.flatten(1)
+  end.flatten(1)
+
+  # iterate each cell containing the input cell, with its layer offset
+  def each_containing(i, j, k)
+    CONTAINED_BY.each do |di, dj, dk, dlayer|
+      di += i; dj += j; dk += k
+      idx = index(di, dj, dk)
+      next unless idx
+      yield dlayer, di, dj, dk, idx
+    end
+  end
+
+  # iterate the cells of a pentomino
+  def each_in_pentomino(i, j, k, normal, type)
+    TYPES[normal][type].each do |di, dj, dk|
+      di += i; dj += j; dk += k
+      idx = index(di, dj, dk)
+      next unless idx
+      yield di, dj, dk, idx
+    end
+  end
+
+  # for each cell, if it's an X or O, increment the appropriate panhandles'
+  # counts, using CONTAINED_BY.
+  def search
+    each_with_indices do |cell, i, j, k, idx|
+      next if cell == '_'
+      base = 1 + 24 * (cell == 'X' ? X : O)
+      each_containing(i, j, k) do |dlayer, i2, j2, k2, idx2|
+        # add hit
+        #p [i, j, k, cell, base + dlayer, i2, j2, k2]
+        layer = @layers[base + dlayer]
+        layer[idx2] += 1
+        next unless layer[idx2] == 4
+
+        # that was the fourth hit on that particular pentomino, check if
+        # there's an empty spot in its layout
+        normal = dlayer / 8
+        type = dlayer % 8
+        each_in_pentomino(i2, j2, k2, normal, type) do |i3, j3, k3, idx3|
+          # if we find one, we know the other four are filled (cause 4 hits),
+          # so that's a pentomino play. yield it, and say whose pent it is
+          yield [i3, j3, k3, cell] if @layers[0][idx3] == '_'
+        end
+      end
+    end
+  end
+end
+
+#$sleep = false
+#Board.read
+#Board.read
+#$sleep = true
+while board = Board.read
+  move = nil
+  board.search do |i, j, k, who|
+    if who == 'X'
+      # this move completes a pent for me, play it
+      board.play(i, j, k)
+      move = nil
+      break
+    elsif move.nil?
+      # this move blocks an opponent, but don't use it yet; keep looking for a
+      # move for me to win on
+      move = [i, j, k]
+    end
+  end
+  if move
+    board.play(*move)
+  end
+end
